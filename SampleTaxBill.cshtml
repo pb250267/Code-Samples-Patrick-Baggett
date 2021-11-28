@@ -1,0 +1,688 @@
+@using Common.Data.Enums
+@using System
+@using System.Web.Mvc
+@using System.Web.Routing
+@using CSI.Core.Web
+
+@{
+    ViewBag.Title = "Sample County Tax Collector";
+    ViewBag.PropertyId = Model[MetadataKeyTypeEnum.PAYMENTID_THREE.uuid];
+    ViewBag.TaxYear = Model[MetadataKeyTypeEnum.PAYMENTID_TEN.uuid];
+    ViewBag.BillNo = Model[MetadataKeyTypeEnum.PAYMENTID_FOUR.uuid];
+
+    var styleController = DependencyResolver.Current.GetService<CSI.Web.Areas.Branding.Controllers.StyleSheetController>();
+    dynamic result = styleController.BrandImage(SessionGetter.Client.Id);
+
+    @section Scripts {
+        <script type="text/JavaScript">
+
+            $(document).ready(function () {
+                        load('@Model[MetadataKeyTypeEnum.PAYMENTID_THREE.uuid]', '@Model[MetadataKeyTypeEnum.PAYMENTID_TEN.uuid]', '@Model[MetadataKeyTypeEnum.PAYMENTID_FOUR.uuid]')
+            });
+
+            async function load(propertyid, taxyear, billno) {
+                let tax_bills = await getTaxBills(propertyid);
+                document.getElementById('print_button').addEventListener('click', function () { window.print() });
+
+                var total_millage = 0;
+                var total_gross = 0;
+                var total_credit = 0;
+                var total_net = 0;
+
+                var penalty = 0;
+                var interest = 0;
+                var other_fees = 0;
+                var back_taxes = 0;
+                var amount_paid = 0;
+                var total_due = 0;
+                var good_thru = "";
+
+                var tax_entity_name_row_formating_map = new Map();
+                tax_entity_name_row_formating_map.set("HOST TAX CREDIT", "<span style='padding-left:20px'>HOST TAX CREDIT<span>");
+
+                //console.log('taxbills result', tax_bills);
+                var i = 0;
+                //look for first bill matching the desired tax year and bill number
+                while (i < tax_bills.length) {
+                    var bill = tax_bills[i];
+
+                    //sum up old oustanding bills for back taxes
+                    if (bill.tax_year < taxyear) {
+                        back_taxes += bill.current_bill_amt;
+                    } else if (bill.tax_year == taxyear && bill.bill_no == billno) {
+                        //grab common data fields from first bill
+                        penalty = bill.penalty_amt;
+                        interest = bill.interest_amt;
+                        other_fees = bill.other_fees;
+                        amount_paid = bill.paid_amt;
+
+                        document.getElementById('bill_no_upper').innerText = bill.tax_year + "-" + bill.bill_no;
+                        document.getElementById('bill_no_lower').innerText = bill.tax_year + "-" + bill.bill_no;
+                        document.getElementById('bldg_value').innerText = (bill.bldg_value == null ? "" : '$' + bill.bldg_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"));
+                        document.getElementById('land_value').innerText = (bill.land_value == null ? "" : '$' + bill.land_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"));
+                        document.getElementById('desc').innerText = bill.property_desc;
+                        document.getElementById('location_upper').innerText = bill.property_address_line1;
+                        document.getElementById('location_lower').innerText = bill.property_address_line1;
+                        document.getElementById('map_no_upper').innerText = bill.assessors_property_id;
+                        document.getElementById('map_no_lower').innerText = bill.assessors_property_id;
+                        document.getElementById('acres').innerText = bill.acres;
+                        document.getElementById('assessed_value').innerText = '$' + bill.assessed_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");;
+                        document.getElementById('current_due_date_upper').innerText = formatDateString(bill.current_due_date);
+                        document.getElementById('current_due_date_lower').innerText = formatDateString(bill.current_due_date);
+                        document.getElementById('billing_date').innerText = bill.billing_date;
+                        document.getElementById('payment_good_through_upper').innerText = goodThrudateString(bill.payment_good_through);
+                        document.getElementById('payment_good_through_lower').innerText = goodThrudateString(bill.payment_good_through);
+                        document.getElementById('exemptions').innerText = (bill.exempt_id_hmstd == null ? "" : bill.exempt_id_hmstd) + (bill.exempt_id_other == null ? "" : bill.exempt_id_other) + (bill.exempt_id_other2 == null ? "" : bill.exempt_id_other2) + (bill.exempt_id_other3 == null ? "" : bill.exempt_id_other3);
+                        document.getElementById('district').innerText = bill.district_id;
+                        document.getElementById('last_payment_date').innerText = formatDateString(bill.paid_date);
+
+                        document.getElementById('owner_name').innerText = bill.owner_name;
+                        document.getElementById('tax_payer').innerText = bill.owner_name;
+                        document.getElementById('address_line1').innerText = bill.address_line1;
+                        document.getElementById('address_line2').innerText = bill.address_line2;
+                        document.getElementById('address_line3').innerText = bill.city.trim() + ', ' + bill.state + ' ' + bill.zip_code;
+
+                        //loop through remaining current bills to populate the breakdown table with each taxing entity's data
+                        var breakdownTable = document.getElementById("lower_tax_breakdown_table");
+                        //while (i < tax_bills.length && tax_bills[i].tax_year == taxyear && tax_bills[i].bill_no == billno)
+                        //{
+                        //    bill = tax_bills[i];
+                        //    let exemptions = bill.exemption_amt_local + bill.exemption_amt_state + bill.exemption_amt_other;
+                        //    let taxable_value = bill.taxable_amt - exemptions;
+                        //    let breakdownTableDataArray = [
+                        //        tax_entity_name_row_formating_map.get(bill.tax_acct_name) === undefined ? bill.tax_acct_name : tax_entity_name_row_formating_map.get(bill.tax_acct_name),
+                        //        '$' + bill.assessed_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        bill.gross_assessment == null ? "" : '$' + bill.gross_assessment.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        exemptions == 0 ? "" : '$' + exemptions.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        taxable_value == 0 ? "" : '$' + taxable_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        bill.millage_rate.toFixed(4),
+                        //        '$' + (bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0).toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        '$' + bill.credit_tax_amt.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //        '$' + ((bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0) + bill.credit_tax_amt).toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,")
+                        //    ];
+                        //    generateTaxBreakdownTableRow(breakdownTable, breakdownTableDataArray);
+
+                        //    total_millage += bill.millage_rate;
+                        //    total_gross += bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0;
+                        //    total_credit += bill.credit_tax_amt;
+                        //    total_net += bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0 + bill.credit_tax_amt;
+                        //    i++;
+                        //} ;
+
+
+                            let exemptions = bill.exemption_amt_local + bill.exemption_amt_state + bill.exemption_amt_other;
+                            let taxable_value = bill.taxable_amt - exemptions;
+                            let breakdownTableDataArray = [
+                                tax_entity_name_row_formating_map.get(bill.tax_acct_name) === undefined ? bill.tax_acct_name : tax_entity_name_row_formating_map.get(bill.tax_acct_name),
+                                '$' + bill.assessed_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                bill.gross_assessment == null ? "" : '$' + bill.gross_assessment.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                exemptions == 0 ? "" : '$' + exemptions.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                taxable_value == 0 ? "" : '$' + taxable_value.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                bill.millage_rate.toFixed(4),
+                                '$' + (bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0).toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                '$' + bill.credit_tax_amt.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                                '$' + ((bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0) + bill.credit_tax_amt).toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,")
+                            ];
+                            generateTaxBreakdownTableRow(breakdownTable, breakdownTableDataArray);
+
+                            total_millage += bill.millage_rate;
+                            total_gross += bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0;
+                            total_credit += bill.credit_tax_amt;
+                            total_net += bill.total_gross_tax >= 0 ? bill.total_gross_tax : 0 + bill.credit_tax_amt;
+
+
+
+                        //let totalsDataArray = [
+                        //    "TOTALS",
+                        //    "",
+                        //    "",
+                        //    "",
+                        //    "",
+                        //    total_millage.toFixed(4),
+                        //    '$' + total_gross.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //    '$' + total_credit.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                        //    '$' + total_net.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,")
+                        //];
+                        //generateTaxBreakdownTableRow(breakdownTable, totalsDataArray);
+
+                        total_due = (total_net + penalty + interest + other_fees + back_taxes) - amount_paid;
+
+                        document.getElementById('total_net_upper').innerText = '$' + total_net.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+
+                        document.getElementById('current_due').innerText = '$' + total_net.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('penalty').innerText = '$' + penalty.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('interest').innerText = '$' + interest.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('other_fees').innerText = '$' + other_fees.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('back_taxes').innerText = '$' + back_taxes.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('amount_paid').innerText = '$' + amount_paid.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                        document.getElementById('total_due').innerText = '$' + total_due.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,");
+                    }
+                    i++;
+                }
+                let totalsDataArray = [
+                    "TOTALS",
+                    "",
+                    "",
+                    "",
+                    "",
+                    total_millage.toFixed(4),
+                    '$' + total_gross.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                    '$' + total_credit.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,"),
+                    '$' + total_net.toFixed(2).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1,")
+                ];
+                generateTaxBreakdownTableRow(breakdownTable, totalsDataArray);
+
+                async function getTokenData() {
+
+                    let myHeaders = new Headers(); myHeaders.append("Content-Type", "application/x-www-form-urlencoded");
+                    let urlencoded = new URLSearchParams();
+                    urlencoded.append("grant_type", "password");
+                    urlencoded.append("username", "xxxxxxxx");
+                    urlencoded.append("password", "xxxxxxxxxx");
+                    let requestOptions = {
+                        method: 'POST',
+                        headers: myHeaders,
+                        body: urlencoded,
+                        redirect: 'follow'
+                    };
+                    let url = 'https://cccjctaxcwa.sample.ga.us:443/token';
+
+                    try {
+                        let res = await fetch(url, requestOptions);
+                        return await res.json();
+                    } catch (error) {
+                        console.log("error retrieving token data");
+                        console.log(error);
+                    }
+                }
+
+                async function getTaxBills(propertyid) {
+                    //hardcoded for test
+                    //var property_id = "003001006B";
+                    // get token
+                    let tokendata = await getTokenData();
+                    //console.log(tokendata); 
+                    let myHeaders = new Headers();
+                    myHeaders.append("Content-Type", "application/x-www-form-urlencoded");
+                    myHeaders.append("Authorization", "bearer " + tokendata.access_token);
+                    //console.log("bearer "+tokendata.access_token);   
+
+                    let requestOptions = {
+                        method: 'POST',
+                        headers: myHeaders,
+                        redirect: 'follow'
+                    };
+
+                    let url = 'https://cccjctaxcwa.sample.ga.us:443/api/taxbill/gettaxbills?property_id=' + propertyid;
+                    //let url = 'https://cccjctaxcwa.sample.ga.us:443/api/taxbill/propertyidsearch?property_id=' + propertyid;
+                    try {
+                        let res = await fetch(url, requestOptions);
+                        return await res.json();
+                    } catch (error) {
+                        console.log("error retrieving tax bill");
+                    //    console.log(error);
+                    }
+                }
+
+                //Populates the Tax Breakdown table with a new row
+                function generateTaxBreakdownTableRow(table, cellData) {
+                    //insert new row to end of table
+                    let newRow = table.insertRow(-1);
+                    cellData.forEach(function (currentValue) {
+                        let newCell = newRow.insertCell();
+                        newCell.innerHTML = currentValue;
+                    });
+                }
+
+                //formats the date returned by the api into dd-mm-yyyy. Returns "" in case of null.
+                function formatDateString(dateString) {
+                    if (dateString == null) {
+                        return "";
+                    } else {
+                        let yearMonthDayDateStringArray = dateString.split('T')[0].split('-');
+                        return yearMonthDayDateStringArray[1] + '-' + yearMonthDayDateStringArray[2] + '-' + yearMonthDayDateStringArray[0]
+                    }
+                }
+                //Evaluates the date returned by the api versus the current date. Returns "" in case of null.
+                function goodThrudateString(dateString) {
+                    var today = new Date();
+                    var dd = String(today.getDate()).padStart(2, '0');
+                    var mm = String(today.getMonth() + 1).padStart(2, '0'); //January is 0!
+                    var yyyy = today.getFullYear();
+                    var todayString = dd + "-" + mm + '-' + yyyy;
+
+                    if (dateString == null) {
+                        return "";
+                    }
+
+                    let yearMonthDayDateStringArray = dateString.split('T')[0].split('-');
+                    let newDateString = yearMonthDayDateStringArray[1] + '-' + yearMonthDayDateStringArray[2] + '-' + yearMonthDayDateStringArray[0]
+                    var evalDate = new Date(newDateString);
+                    if (evalDate < today.getDate()) {
+                        return todayString;
+                    }
+
+                    return newDateString;
+                }
+            }
+        </script>
+    }
+
+    @functions
+    {
+        public string FormatDecimal(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return null;
+            return String.Format("{0:N}", int.Parse(value) / 100.0);
+        }
+        public string FormatDecimalUnits(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return null;
+            return String.Format("{0:N4}", Convert.ToDecimal(value));
+        }
+
+        public string FormatCurrency(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return null;
+            return String.Format("{0:C}", Convert.ToDecimal(value));
+        }
+    }
+}
+
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Sample County Property Tax Bill</title>
+    <script type="text/javascript" src="/magic-ui/Scripts/jquery-3.4.1.min.js"></script>
+    <style type="text/css">
+        body {
+            font-family: sans-serif;
+        }
+
+        .line2 {
+            content: "";
+            position: relative;
+            display: block;
+            width: 1100px;
+            border-top: 3px dashed black;
+            margin-bottom: 10px;
+        }
+
+        table.upper_page {
+            width: 1100px;
+        }
+
+        table.bill_info_table {
+            border: 1px solid black;
+            border-collapse: collapse;
+            width: 500px;
+        }
+
+            table.bill_info_table tr:last-child td {
+                text-align: right;
+                border: 1px solid black;
+            }
+
+        table.upper_summary_box {
+            margin-left: 10%;
+        }
+
+        table.lower_page {
+            width: 1100px;
+            border-collapse: collapse;
+        }
+
+        table.property_info_table {
+            text-align: center;
+            border: 1px solid black;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+            table.property_info_table td {
+                border: 1px solid black;
+            }
+
+        table.lower_tax_breakdown_table {
+            margin-top: 10px;
+            border-spacing: 0px 2px;
+            border-collapse: separate;
+            width: 100%;
+        }
+
+            table.lower_tax_breakdown_table tr:first-child td {
+                text-align: center;
+                background-color: rgb(105,105,105);
+                color: white;
+            }
+
+                table.lower_tax_breakdown_table tr:first-child td:last-child {
+                    border-right: 1px solid black;
+                }
+
+            table.lower_tax_breakdown_table tr:last-child td {
+                background-color: rgb(211,211,211);
+            }
+
+            table.lower_tax_breakdown_table td:first-child {
+                text-align: left;
+            }
+
+            table.lower_tax_breakdown_table td {
+                padding: 0px;
+                border: 1px solid black;
+                border-right: 0px;
+                text-align: right;
+            }
+
+                table.lower_tax_breakdown_table td:last-child {
+                    border-right: 1px solid black;
+                }
+
+        tr.footer {
+            border: 1px solid black;
+            border-collapse: collapse;
+        }
+
+        td.ad_valorem_blurb {
+            width: auto;
+            vertical-align: top;
+            padding-bottom: 0px;
+            padding-left: 5px;
+        }
+
+        table.lower_bill_summary {
+            width: %;
+            margin-left:;
+            border-collapse: collapse;
+            min-width: 250px;
+        }
+
+            table.lower_bill_summary tr td {
+                height: 100%;
+                width: 100%;
+                border-left: 1px solid black;
+                border-bottom: 1px solid black;
+            }
+
+                table.lower_bill_summary tr td:last-child {
+                    border-left: 1px solid black;
+                    text-align: right;
+                    padding-right: 10px;
+                    padding-left: 50px
+                }
+
+            table.lower_bill_summary tr:last-child td {
+                vertical-align: bottom;
+                padding-bottom: 10px;
+                height: 30px;
+                border-bottom: none;
+            }
+
+        .print_button {
+        }
+    </style>
+    @RenderSection("Scripts", required: false)
+</head>
+<body>
+    <table class="upper_page">
+        <tr style="vertical-align:top;">
+            <td>
+                <table class="address_box">
+                    <tr>
+                        <td id="TAX_YEAR"><h1><u>@Model[MetadataKeyTypeEnum.PAYMENTID_TEN.uuid] Property Tax Statement</u></h1></td>
+                    </tr>
+                    <tr>
+                        <td>Jon Doe</td>
+                    </tr>
+                    <tr>
+                        <td>Sample County Tax Commissioner</td>
+                    </tr>
+                    <tr>
+                        <td>PO Box 123</td>
+                    </tr>
+                    <tr>
+                        <td>Sample, Georgia 30264-0195</td>
+                    </tr>
+                    <tr>
+                        <td>Phone: (800)-555-1234</td>
+                    </tr>
+                    <tr>
+                        <td>Fax: (800)-555-1234</td>
+                    </tr>
+                    <tr>
+                        <td style="padding-top:20px"><b>MAKE CHECK OR MONEY ORDER PAYABLE TO:</b></td>
+                    </tr>
+                    <tr>
+                        <td>Sample County Tax Commissioner</td>
+                    </tr>
+                    <tr style="height:100px">
+                    </tr>
+                    <tr>
+                        <td>
+                            <table>
+                                <tr>
+                                    <td id="owner_name"></td>
+                                </tr>
+                                <tr>
+                                    <td id="address_line1"></td>
+                                </tr>
+                                <tr>
+                                    <td id="address_line2"></td>
+                                </tr>
+                                <tr>
+                                    <td id="address_line3"></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding-top:30%;padding-left:70px"><b>RETURN THIS FORM WITH PAYMENT</b></td>
+                                </tr>
+                                <tr>
+                                    <td style="padding-left:70px">(Interest will be added per month if not paid by due date)</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+            <td style="padding-right:0px;">
+                <table style="margin-right:0%;margin-left:auto">
+                    <tr>
+                        <td>
+                            <table class="bill_info_table">
+                                <tr style="background-color:rgb(211,211,211)">
+                                    <th style="text-align:center;"> Bill Number </th>
+                                    <th> Due Date </th>
+                                    <th> CURRENT YEAR DUE</th>
+                                </tr>
+                                <tr>
+                                    <td id="bill_no_upper"></td>
+                                    <td id="current_due_date_upper"></td>
+                                    <td id="total_net_upper"></td>
+                                </tr>
+                            </table>
+                        </td>
+                        <button id="print_button" style="float:right">Print</button>
+                    </tr>
+                    <tr style="max-width:100%;white-space:nowrap;">
+                        <td style="text-align:right">Payment good through: <span id="payment_good_through_upper"></span></td>
+                    </tr>
+                    <tr style="height:75px">
+                    </tr>
+                    <tr>
+                        <td style="font-size:130%">Map:<span id="map_no_upper"></span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-size:130%">Last Payment Made On: <span id="last_payment_date"></span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding-bottom:20px;font-size:130%">Location: <span id="location_upper"></span></td>
+                    </tr>
+                    <tr>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+    <div class="line2"></div>
+    <table class="lower_page" cellspacing=0 cellpadding=0>
+        <tr>
+            <td style="width:45%;">
+                <table>
+                    <tr>
+                        <td>Robi Brook</td>
+                    </tr>
+                    <tr>
+                        <td>Sample County Tax Commissioner</td>
+                    </tr>
+                    <tr>
+                        <td>PO Box 123</td>
+                    </tr>
+                    <tr>
+                        <td>Sample, Georgia 30264-0195</td>
+                    </tr>
+                    <tr>
+                        <td>Phone: 800-555-1234</td>
+                    </tr>
+                    <tr>
+                        <td>Fax: 800-555-1234</td>
+                    </tr>
+                </table>
+            </td>
+            <td style="width:10%">
+                @if (result != null)
+                {
+                    if (result.ViewData.Model.HasBrandingImage)
+                    {
+                        <img width="150px" alt="Seal of the State of Georgia" style="vertical-align:middle;" src="@UrlHelper.GenerateUrl(null, "ShowImage", "Branding", new RouteValueDictionary(new {area = "Branding", id = ClientImageTypeEnum.BrandImage.uuid}), RouteTable.Routes, System.Web.HttpContext.Current.Request.RequestContext, false)" />
+                    }
+                }
+            </td>
+            <td style="width:45%">
+                <table style="margin-left:auto">
+                    <tr>
+                        <td><b>Tax Payer:<b></b></b></td>
+                        <td id="tax_payer"></td>
+                    </tr>
+                    <tr>
+                        <td><b>Map Code:<b></b></b></td>
+                        <td id="map_no_lower"></td>
+                    </tr>
+                    <tr>
+                        <td><b>Description:<b></b></b></td>
+                        <td id="desc"></td>
+                    </tr>
+                    <tr>
+                        <td><b>Location:<b></b></b></td>
+                        <td id="location_lower"></td>
+                    </tr>
+                    <tr>
+                        <td><b>Bill Number:<b></b></b></td>
+                        <td id="bill_no_lower"></td>
+                    </tr>
+                    <tr>
+                        <td><b>District:<b></b></b></td>
+                        <td id="district"></td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td colspan=3>
+                <table class="property_info_table">
+                    <tr>
+                        <td>Building <br />Value</td>
+                        <td>Land<br /> Value</td>
+                        <td>Acres</td>
+                        <td>Fair Market <br /> Value</td>
+                        <td>Due <br /> Date</td>
+                        <td>Billing<br /> Date</td>
+                        <td>Payment <br /> Good Through</td>
+                        <td>Exemptions</td>
+                    </tr>
+                    <tr>
+                        <td id="bldg_value"></td>
+                        <td id="land_value"></td>
+                        <td id="acres"></td>
+                        <td id="assessed_value"></td>
+                        <td id="current_due_date_lower"></td>
+                        <td id="billing_date"></td>
+                        <td id="payment_good_through_lower"></td>
+                        <td id="exemptions"></td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td colspan=3>
+                <table id="lower_tax_breakdown_table" class="lower_tax_breakdown_table">
+                    <tr>
+                        <td> Taxing Entity</td>
+                        <td> Adjusted FMV</td>
+                        <td> Net Assessment</td>
+                        <td> Exemptions</td>
+                        <td> Taxable Value</td>
+                        <td> Millage Rate</td>
+                        <td> Gross Tax</td>
+                        <td> Credit</td>
+                        <td>Net Tax</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td class="millage_rate_blurb_box" colspan="3" style="padding-bottom:200px; padding-left:50%">
+                This gradual reduction and elimination of the state property tax millage rate is the result of
+                property tax relief passed by the Governor and the House of Representatives and the Georgia
+                State Senate.
+            </td>
+        </tr>
+        <tr class="footer">
+            <td colspan="2" class="ad_valorem_blurb">
+                This is your Ad Valorem Tax Bill for the property that you owned in Sample County on January 1. This
+                bill must be paid in full by the DUE DATE to avoid any interest or penalty charges. Although you may no
+                longer own this property, you are still responsible by state law for ensuring this bill is paid. If you
+                contracted with the new owner and made it their responsibility to pay this bill, please forward a copy of
+                this bill to the new owner. If your mortgage company pays your bill, please forward a copy to them.
+            </td>
+            <td style="vertical-align:top">
+                <table class="lower_bill_summary">
+                    <tr>
+                        <td> Current Due: </td>
+                        <td id="current_due"></td>
+                    </tr>
+                    <tr>
+                        <td> Penalty: </td>
+                        <td id="penalty"></td>
+                    </tr>
+                    <tr>
+                        <td> Interest: </td>
+                        <td id="interest"></td>
+                    </tr>
+                    <tr>
+                        <td> Other Fees: </td>
+                        <td id="other_fees"></td>
+                    </tr>
+                    <tr>
+                        <td> Previous Payments: </td>
+                        <td id="amount_paid"></td>
+                    </tr>
+                    <tr>
+                        <td> Back Taxes: </td>
+                        <td id="back_taxes"></td>
+                    </tr>
+                    <tr>
+                        <td> Total Due: </td>
+                        <td id="total_due"></td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
